@@ -1,0 +1,9 @@
+# build output
+build/
+
+# host test binary
+tests/host/test
+
+# python
+__pycache__/
+*.pyc
