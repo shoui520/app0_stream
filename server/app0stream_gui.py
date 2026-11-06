@@ -114,7 +114,16 @@ class Api:
 
         external = None
         if server is None:
+            had = self._external is not None
             external = self._find_external(int(self._settings["port"]))
+
+            # the server that held the port went away: take over, so that
+            # consoles reconnect to this one
+            if had and external is None and self._settings["autostart"] and self._settings["library"]:
+                srv.log("the other server stopped; serving from here")
+                self.start_server()
+                with self._lock:
+                    server = self._server
 
         state = {
             "settings": self._settings,
