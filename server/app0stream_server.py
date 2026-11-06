@@ -12,9 +12,12 @@ LIBRARY holds the games the way the memory card holds them:
 
 "stub" copies what has to stay on the memory card (sce_sys/, sce_pfs/ and
 eboot.bin, which the system's promoter may look for; the game still loads
-it from the PC)
-into OUTPUT/app/PCSE00001 or OUTPUT/patch/PCSE00001; copy OUTPUT's contents
-to ux0: and refresh the LiveArea (VitaShell: "Refresh LiveArea").
+it from the PC) into OUTPUT/app/PCSE00001 or OUTPUT/patch/PCSE00001, with the
+marker file that tells the plugin to stream it.  Copy OUTPUT's contents to
+ux0: and refresh the LiveArea (VitaShell: "Refresh LiveArea"); the game is
+then launched from its bubble.
+
+The module is also what app0stream_gui.py runs the server with.
 
 Protocol: see src/proto.h.  Requests are answered in order on each
 connection; the plugin opens one connection per worker thread.
@@ -46,6 +49,8 @@ OP_LOG = 5
 TYPE_FILE = 1
 TYPE_DIR = 2
 
+MARKER = "app0stream.txt"   # src/a0s.h A0S_MARKER
+
 MAX_PATH = 255
 MAX_READ = 1024 * 1024
 MAX_DIRENTS = 64
@@ -71,6 +76,10 @@ class Error(Exception):
     def __init__(self, code):
         super().__init__(code)
         self.code = code
+
+
+class StubError(Exception):
+    """A stub or param.sfo that cannot be made or read."""
 
 
 def fold(name):
@@ -254,10 +263,12 @@ class Handler(socketserver.BaseRequestHandler):
         self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.request.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
         self.peer = "%s:%d" % self.client_address[:2]
+        self.conn = self.server.stats.connect(self.peer, self.request)
         log(f"{self.peer} connected")
 
     def finish(self):
         self.server.library.close_files()
+        self.server.stats.disconnect(self.peer)
         log(f"{self.peer} disconnected")
 
     def handle(self):
@@ -277,7 +288,7 @@ class Handler(socketserver.BaseRequestHandler):
                 log(f"{self.peer}: bad request magic {magic:08X}")
                 return
 
-            status, payload = 0, b""
+            status, payload, rel = 0, b"", ""
             try:
                 rel = path.decode("utf-8")
                 if op == OP_HELLO:
@@ -307,19 +318,88 @@ class Handler(socketserver.BaseRequestHandler):
             elif self.server.verbose >= 2 and status >= 0:
                 log(f"{self.peer}: read {path!r} @{arg1} +{arg0} -> {status}")
 
+            self.server.stats.request(self.conn, op, rel if op in (OP_STAT, OP_READ) else None,
+                                      len(payload) if op == OP_READ else 0)
+
             try:
                 sock.sendall(RSP.pack(RSP_MAGIC, seq, status, len(payload)) + payload)
             except OSError:
                 return
 
 
+class Stats:
+    """What the server is doing, for the GUI: connections and totals."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.started = time.time()
+        self.conns = {}         # peer -> dict
+        self.requests = 0
+        self.bytes = 0
+
+    def connect(self, peer, sock):
+        conn = {"peer": peer, "sock": sock, "since": time.time(),
+                "requests": 0, "bytes": 0, "last_path": "", "last_time": time.time()}
+        with self.lock:
+            self.conns[peer] = conn
+        return conn
+
+    def disconnect(self, peer):
+        with self.lock:
+            self.conns.pop(peer, None)
+
+    def request(self, conn, op, path, nbytes):
+        now = time.time()
+        with self.lock:
+            self.requests += 1
+            self.bytes += nbytes
+            conn["requests"] += 1
+            conn["bytes"] += nbytes
+            conn["last_time"] = now
+            if path:
+                conn["last_path"] = path
+
+    def snapshot(self):
+        with self.lock:
+            conns = [{k: v for k, v in c.items() if k != "sock"} for c in self.conns.values()]
+            return {"requests": self.requests, "bytes": self.bytes,
+                    "started": self.started, "connections": conns}
+
+    def close_all(self):
+        with self.lock:
+            socks = [c["sock"] for c in self.conns.values()]
+        for s in socks:
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
 class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+    def stop(self):
+        """Stops accepting, drops every connection and frees the port."""
+        self.shutdown()
+        self.stats.close_all()
+        self.server_close()
+
+
+_log_sinks = []
+
+
+def add_log_sink(fn):
+    """fn(line) is called with every log line, from any thread."""
+    _log_sinks.append(fn)
+
 
 def log(msg):
-    print(time.strftime("%H:%M:%S ") + msg, flush=True)
+    line = time.strftime("%H:%M:%S ") + msg
+    if sys.stdout:
+        print(line, flush=True)
+    for fn in _log_sinks:
+        fn(line)
 
 
 def local_addresses():
@@ -333,10 +413,12 @@ def local_addresses():
         return []
 
 
-def serve(args):
-    lib = Library(args.library)
+def start_server(library, port=DEFAULT_PORT, bind="0.0.0.0", verbose=0):
+    """A Server for library, bound and ready; run serve_forever() on it.
+    Raises OSError when the port is taken."""
+    lib = Library(library)
     if not os.path.isdir(lib.root):
-        sys.exit(f"{args.library}: not a directory")
+        raise OSError(f"{library}: not a directory")
 
     for kind in ("app", "patch"):
         d = os.path.join(lib.root, kind)
@@ -344,14 +426,24 @@ def serve(args):
             titles = sorted(os.listdir(d))
             log(f"{kind}: {', '.join(titles) if titles else '(none)'}")
 
-    server = Server((args.bind, args.port), Handler)
+    server = Server((bind, port), Handler)
     server.library = lib
-    server.verbose = args.verbose
+    server.verbose = verbose
+    server.stats = Stats()
 
     for addr in local_addresses():
-        log(f"listening on {addr}:{args.port} (server = {addr} in config.txt)")
+        log(f"listening on {addr}:{port} (server = {addr} in config.txt)")
     if not local_addresses():
-        log(f"listening on port {args.port}")
+        log(f"listening on port {port}")
+
+    return server
+
+
+def serve(args):
+    try:
+        server = start_server(args.library, args.port, args.bind, args.verbose)
+    except OSError as e:
+        sys.exit(str(e))
 
     try:
         server.serve_forever()
@@ -361,44 +453,133 @@ def serve(args):
 
 # ---- stubs ------------------------------------------------------------------
 
-def stub(args):
-    kind = "patch" if args.patch else "app"
-    title = args.titleid.upper()
+def read_sfo(path):
+    """param.sfo's entries as a dict; dumps keep it in the clear."""
+    with open(path, "rb") as f:
+        data = f.read()
 
-    src = None
-    base = os.path.join(args.library, kind)
-    if os.path.isdir(base):
-        for name in os.listdir(base):
-            if name.upper() == title:
-                src = os.path.join(base, name)
+    magic, version, keys, values, count = struct.unpack_from("<4sIIII", data)
+    if magic != b"\0PSF":
+        raise StubError(f"{path}: not a param.sfo")
 
+    out = {}
+    for i in range(count):
+        key_off, fmt, length, _, off = struct.unpack_from("<HHIII", data, 20 + i * 16)
+        key = data[keys + key_off:data.index(b"\0", keys + key_off)].decode("utf-8", "replace")
+        raw = data[values + off:values + off + length]
+        if fmt == 0x0404:
+            out[key] = struct.unpack("<I", raw[:4])[0]
+        else:
+            out[key] = raw.split(b"\0", 1)[0].decode("utf-8", "replace")
+    return out
+
+
+def find_folder(parent, name):
+    """parent/name, matched without regard to case, or None."""
+    if not os.path.isdir(parent):
+        return None
+    for n in os.listdir(parent):
+        if n.upper() == name.upper():
+            return os.path.join(parent, n)
+    return None
+
+
+def folder_size(path):
+    return sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(path) for f in fs)
+
+
+def titles(library):
+    """Every title in library: id, name, version, sizes and whether it has a patch."""
+    out = {}
+    for kind in ("app", "patch"):
+        base = os.path.join(library, kind)
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            src = os.path.join(base, name)
+            if not os.path.isdir(src):
+                continue
+
+            tid = name.upper()
+            t = out.setdefault(tid, {"id": tid, "name": "", "version": "", "app": None, "patch": None})
+
+            sfo = find_folder(src, "sce_sys")
+            sfo = sfo and find_folder(sfo, "param.sfo")
+            info = {}
+            if sfo:
+                try:
+                    info = read_sfo(sfo)
+                except (OSError, StubError, struct.error, ValueError):
+                    pass
+
+            t[kind] = {"path": src, "size": folder_size(src),
+                       "version": info.get("APP_VER", ""), "valid": sfo is not None}
+            if info.get("TITLE") and (kind == "app" or not t["name"]):
+                t["name"] = info["TITLE"].replace("\n", " ")
+            if info.get("APP_VER"):
+                t["version"] = info["APP_VER"]
+
+    return sorted(out.values(), key=lambda t: (t["name"] or t["id"]).lower())
+
+
+def same_or_inside(a, b):
+    """Whether folders a and b are the same, or one holds the other."""
+    a = os.path.normcase(os.path.realpath(a))
+    b = os.path.normcase(os.path.realpath(b))
+    return a == b or a.startswith(b.rstrip(os.sep) + os.sep) or b.startswith(a.rstrip(os.sep) + os.sep)
+
+
+def make_stub(library, title, output, patch=False, eboot=True):
+    """Writes the memory card stub for title into output/app|patch/TITLE.
+    Returns (path, size); raises StubError.
+
+    It only ever creates files: an existing stub is left alone, and an
+    output folder that is, holds or is inside the library is refused, so
+    a game dump can never be touched."""
+    kind = "patch" if patch else "app"
+    title = title.upper()
+
+    if same_or_inside(library, output):
+        raise StubError("the stub folder must be outside the game library")
+
+    src = find_folder(os.path.join(library, kind), title)
     if src is None:
-        sys.exit(f"{title} is not in {base}")
+        raise StubError(f"{title} is not in {os.path.join(library, kind)}")
 
     names = {n.lower(): n for n in os.listdir(src)}
     if "sce_sys" not in names:
-        sys.exit(f"{src} has no sce_sys/: not a Vita game folder")
-    if "sce_pfs" not in names:
-        print("note: no sce_pfs/, so this is a decrypted (non-PFS) dump")
+        raise StubError(f"{src} has no sce_sys/: not a Vita game folder")
 
-    dst = os.path.join(args.output, kind, title)
+    dst = os.path.join(output, kind, title)
     if os.path.exists(dst):
-        sys.exit(f"{dst} exists already")
+        raise StubError(f"{kind}/{title} is there already; left as it is")
 
     for key in ("sce_sys", "sce_pfs"):
         if key in names:
             shutil.copytree(os.path.join(src, names[key]), os.path.join(dst, names[key]))
 
-    if "eboot.bin" in names and not args.no_eboot:
+    if "eboot.bin" in names and eboot:
         shutil.copy2(os.path.join(src, names["eboot.bin"]), os.path.join(dst, names["eboot.bin"]))
 
-    size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(dst) for f in fs)
+    with open(os.path.join(dst, MARKER), "x") as f:
+        f.write("streamed by app0stream\n")
+
+    return dst, folder_size(dst)
+
+
+def stub(args):
+    try:
+        dst, size = make_stub(args.library, args.titleid, args.output,
+                              args.patch, not args.no_eboot)
+    except (StubError, OSError) as e:
+        sys.exit(str(e))
+
+    kind = "patch" if args.patch else "app"
+    if not os.path.isdir(os.path.join(dst, "sce_pfs")):
+        print("note: no sce_pfs/, so this is a decrypted (non-PFS) dump")
 
     print(f"stub written to {dst} ({size // 1024} KiB)")
-    print()
-    print(f"copy it to ux0:{kind}/{title} and add to ux0:data/app0stream/config.txt:")
-    print()
-    print(f"    {kind if kind == 'patch' else 'title'} = {title}")
+    print(f"copy it to ux0:{kind}/{args.titleid.upper()} and launch the game from its bubble")
 
 
 def main():

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>app0stream</title>
+<style>
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --line: #e2e4e9;
+  --text: #1c1f24;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --ok: #15803d;
+  --ok-bg: #dcfce7;
+  --bad: #b91c1c;
+  --bad-bg: #fee2e2;
+  --row-hover: #f1f5fe;
+  --row-sel: #e4ecfd;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171b;
+    --panel: #1d2025;
+    --line: #2d3138;
+    --text: #e6e8eb;
+    --muted: #9aa1ab;
+    --accent: #4f8cff;
+    --accent-text: #0b1220;
+    --ok: #4ade80;
+    --ok-bg: #14301f;
+    --bad: #f87171;
+    --bad-bg: #3a1717;
+    --row-hover: #232831;
+    --row-sel: #1e2a42;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+button {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+input[type=number], select {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.on { background: var(--ok-bg); color: var(--ok); }
+.spacer { flex: 1; }
+.addr { font-family: var(--mono); font-size: 13px; }
+.muted { color: var(--muted); }
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  padding: 12px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel > h2 {
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel > h2 .spacer { flex: 1; }
+.side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+.path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.path .value {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.path label { font-size: 12px; color: var(--muted); width: 56px; }
+
+.table-wrap { flex: 1; overflow: auto; min-height: 0; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+td.name { white-space: normal; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--row-hover); }
+tbody tr.sel { background: var(--row-sel); }
+.id { font-family: var(--mono); font-size: 12px; }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.empty { padding: 32px; text-align: center; color: var(--muted); }
+
+.stubbar {
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.stubbar label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.results { padding: 0 14px 10px; font-size: 12px; max-height: 120px; overflow: auto; }
+.results div { padding: 2px 0; }
+.results .ok { color: var(--ok); }
+.results .bad { color: var(--bad); }
+
+.kv { padding: 10px 14px; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.conns { padding: 0 14px 12px; font-size: 12px; }
+.conn { padding: 6px 0; border-top: 1px solid var(--line); }
+.conn .last { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.log {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 14px;
+  font: 11.5px/1.45 var(--mono);
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.error { color: var(--bad); font-size: 12px; padding: 0 14px 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>app0stream</h1>
+  <span id="status" class="pill">Stopped</span>
+  <span id="addresses" class="addr muted"></span>
+  <span class="spacer"></span>
+  <label class="muted" for="port">Port</label>
+  <input id="port" type="number" min="1" max="65535" style="width: 84px">
+  <label class="muted"><input id="autostart" type="checkbox"> Start with the app</label>
+  <button id="toggle" class="primary">Start server</button>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Library <span id="count" class="muted"></span><span class="spacer"></span><button id="refresh">Refresh</button></h2>
+
+    <div class="path">
+      <label>Games</label>
+      <span id="library" class="value muted">not chosen</span>
+      <button id="pick-library">Choose…</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 28px"><input id="all" type="checkbox"></th>
+            <th>Title</th>
+            <th>ID</th>
+            <th>Version</th>
+            <th>Update</th>
+            <th class="num">Size</th>
+          </tr>
+        </thead>
+        <tbody id="titles"></tbody>
+      </table>
+      <div id="empty" class="empty">Choose the folder that holds <code>app/</code> and <code>patch/</code>.</div>
+    </div>
+
+    <div class="path" style="border-top: 1px solid var(--line); border-bottom: 0">
+      <label>Stubs to</label>
+      <span id="output" class="value muted">not chosen</span>
+      <button id="open-output">Open</button>
+      <button id="pick-output">Choose…</button>
+    </div>
+    <div class="stubbar">
+      <label><input id="eboot" type="checkbox"> Include eboot.bin</label>
+      <label><input id="write-config" type="checkbox"> Write config.txt for
+        <select id="address"></select></label>
+      <span class="spacer"></span>
+      <button id="make" class="primary" disabled>Make stubs</button>
+    </div>
+    <div id="results" class="results"></div>
+  </section>
+
+  <div class="side">
+    <section class="panel">
+      <h2>Server</h2>
+      <dl class="kv">
+        <dt>Uptime</dt><dd id="uptime">–</dd>
+        <dt>Requests</dt><dd id="requests">–</dd>
+        <dt>Sent</dt><dd id="sent">–</dd>
+        <dt>Consoles</dt><dd id="nconns">–</dd>
+      </dl>
+      <div id="conns" class="conns"></div>
+      <div id="error" class="error"></div>
+    </section>
+
+    <section class="panel" style="flex: 1">
+      <h2>Log<span class="spacer"></span><button id="clear">Clear</button></h2>
+      <pre id="log" class="log"></pre>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let api, state = null, titles = [], selected = new Set(), logSeq = 0;
+
+function size(n) {
+  if (n == null) return "–";
+  const u = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; ++i; }
+  return (i ? n.toFixed(n < 10 ? 2 : 1) : n) + " " + u[i];
+}
+
+function duration(s) {
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+}
+
+function setPath(el, value) {
+  el.textContent = value || "not chosen";
+  el.title = value || "";
+  el.classList.toggle("muted", !value);
+}
+
+async function save(changes) {
+  Object.assign(state.settings, changes);
+  await api.set_settings(changes);
+}
+
+function renderTitles() {
+  const body = $("titles");
+  body.innerHTML = "";
+  for (const t of titles) {
+    const tr = document.createElement("tr");
+    const app = t.app ? t.app.size : 0, patch = t.patch ? t.patch.size : 0;
+    tr.className = selected.has(t.id) ? "sel" : "";
+    tr.innerHTML = `
+      <td><input type="checkbox" ${selected.has(t.id) ? "checked" : ""} ${t.app ? "" : "disabled"}></td>
+      <td class="name">${esc(t.name || "(no param.sfo)")}</td>
+      <td class="id">${esc(t.id)}</td>
+      <td>${esc(t.version || "–")}</td>
+      <td>${t.patch ? `<span class="tag">${esc(t.patch.version || "yes")}</span>` : ""}${t.app ? "" : ' <span class="tag">update only</span>'}</td>
+      <td class="num">${size(app + patch)}</td>`;
+    tr.onclick = e => {
+      if (!t.app) return;
+      selected.has(t.id) ? selected.delete(t.id) : selected.add(t.id);
+      renderTitles();
+    };
+    body.appendChild(tr);
+  }
+  $("empty").style.display = titles.length ? "none" : "";
+  $("count").textContent = titles.length ? `${titles.length} game${titles.length > 1 ? "s" : ""}` : "";
+  const pickable = titles.filter(t => t.app);
+  $("all").checked = pickable.length > 0 && pickable.every(t => selected.has(t.id));
+  $("make").disabled = selected.size === 0;
+  $("make").textContent = selected.size ? `Make ${selected.size} stub${selected.size > 1 ? "s" : ""}` : "Make stubs";
+}
+
+async function loadTitles() {
+  const r = await api.get_titles();
+  titles = r.ok ? r.titles : [];
+  if (!r.ok) $("empty").textContent = r.error;
+  const ids = new Set(titles.map(t => t.id));
+  selected = new Set([...selected].filter(id => ids.has(id)));
+  renderTitles();
+}
+
+function renderAddresses() {
+  const addrs = state.addresses;
+  const port = state.settings.port;
+  $("addresses").textContent = addrs.length ? addrs.map(a => `${a}:${port}`).join("   ") : "no network";
+  const sel = $("address");
+  const want = state.settings.address && addrs.includes(state.settings.address) ? state.settings.address : addrs[0];
+  const now = [...sel.options].map(o => o.value).join();
+  if (now !== addrs.join()) {
+    sel.innerHTML = addrs.map(a => `<option>${esc(a)}</option>`).join("");
+  }
+  if (want) sel.value = want;
+}
+
+function renderServer() {
+  const on = state.running, st = state.stats;
+  $("status").textContent = on ? "Serving" : "Stopped";
+  $("status").classList.toggle("on", on);
+  $("toggle").textContent = on ? "Stop server" : "Start server";
+  $("toggle").classList.toggle("primary", !on);
+  $("port").disabled = on;
+  $("error").textContent = state.error || "";
+
+  $("uptime").textContent = st ? duration(Date.now() / 1000 - st.started) : "–";
+  $("requests").textContent = st ? st.requests.toLocaleString() : "–";
+  $("sent").textContent = st ? size(st.bytes) : "–";
+  $("nconns").textContent = st ? st.connections.length : "–";
+
+  $("conns").innerHTML = st ? st.connections.map(c => `
+    <div class="conn">
+      <div><span class="addr">${esc(c.peer)}</span>
+        <span class="muted"> · ${duration(Date.now() / 1000 - c.since)} · ${size(c.bytes)}</span></div>
+      <div class="last" title="${esc(c.last_path)}">${esc(c.last_path || "–")}</div>
+    </div>`).join("") : "";
+}
+
+async function poll() {
+  state = await api.get_state();
+  renderAddresses();
+  renderServer();
+
+  const l = await api.get_log(logSeq);
+  if (l.lines.length) {
+    const log = $("log");
+    const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+    log.textContent += l.lines.join("\n") + "\n";
+    if (log.textContent.length > 200000) log.textContent = log.textContent.slice(-150000);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+  logSeq = l.seq;
+}
+
+async function init() {
+  api = window.pywebview.api;
+  state = await api.get_state();
+  const s = state.settings;
+
+  setPath($("library"), s.library);
+  setPath($("output"), s.output);
+  $("port").value = s.port;
+  $("autostart").checked = s.autostart;
+  $("eboot").checked = s.eboot;
+  $("write-config").checked = s.write_config;
+
+  $("pick-library").onclick = async () => {
+    const r = await api.choose_folder("library");
+    if (r && r.error) { $("results").innerHTML = `<div class="bad">${esc(r.error)}</div>`; return; }
+    if (r) { setPath($("library"), r.path); state.settings.library = r.path; selected.clear(); loadTitles(); }
+  };
+  $("pick-output").onclick = async () => {
+    const r = await api.choose_folder("output");
+    if (r && r.error) { $("results").innerHTML = `<div class="bad">${esc(r.error)}</div>`; return; }
+    if (r) { setPath($("output"), r.path); state.settings.output = r.path; $("results").innerHTML = ""; }
+  };
+  $("open-output").onclick = () => api.open_folder("output");
+  $("refresh").onclick = loadTitles;
+  $("port").onchange = e => save({port: parseInt(e.target.value, 10) || 7350});
+  $("autostart").onchange = e => save({autostart: e.target.checked});
+  $("eboot").onchange = e => save({eboot: e.target.checked});
+  $("write-config").onchange = e => save({write_config: e.target.checked});
+  $("address").onchange = e => save({address: e.target.value});
+  $("clear").onclick = () => { $("log").textContent = ""; };
+
+  $("all").onchange = e => {
+    selected = e.target.checked ? new Set(titles.filter(t => t.app).map(t => t.id)) : new Set();
+    renderTitles();
+  };
+
+  $("toggle").onclick = async () => {
+    $("toggle").disabled = true;
+    await (state.running ? api.stop_server() : api.start_server());
+    $("toggle").disabled = false;
+    poll();
+  };
+
+  $("make").onclick = async () => {
+    const picks = titles.filter(t => selected.has(t.id)).map(t => ({id: t.id, patch: !!t.patch}));
+    $("make").disabled = true;
+    $("results").innerHTML = '<div class="muted">Writing…</div>';
+    const r = await api.make_stubs(picks);
+    $("results").innerHTML = r.error ? `<div class="bad">${esc(r.error)}</div>` : r.results.map(x => x.ok
+      ? `<div class="ok">✓ ${esc(x.what)} <span class="muted">${x.kept ? "already there, kept" : size(x.size)}</span></div>`
+      : `<div class="bad">✗ ${esc(x.what)}: ${esc(x.error)}</div>`).join("") +
+      (r.ok ? '<div class="muted">Copy the folder\'s contents to ux0:, then Refresh LiveArea in VitaShell.</div>' : "");
+    $("make").disabled = false;
+  };
+
+  await loadTitles();
+  await poll();
+  setInterval(poll, 1000);
+}
+
+window.addEventListener("pywebviewready", init);
+</script>
+</body>
+</html>

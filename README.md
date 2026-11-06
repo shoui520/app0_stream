@@ -16,7 +16,19 @@ File reads pass through a kernel RAM cache with sequential readahead over up to 
 
 ### 1. PC Server
 
-**Prerequisites:** Python 3.8 or newer (no third-party packages required).
+**Prerequisites:** Python 3.8 or newer. The command-line server needs no third-party packages; the desktop app needs `pip install pywebview pystray pillow`.
+
+#### Desktop app
+
+```bash
+python app0stream_gui.py
+```
+
+The window lists the library's games (name, version, size, whether an update is present), starts and stops the server, shows the PC's addresses and the consoles connected to it, and writes stubs for the selected games. On Windows, minimizing it sends it to the tray, where it keeps serving.
+
+The stub generator only ever creates files: it refuses a stub folder that is (or is inside) the game library, and leaves any stub or `config.txt` already in the stub folder as it is.
+
+#### Command line
 
 Organize your game dumps in a directory structure mirroring the PS Vita memory card:
 
@@ -26,7 +38,7 @@ Library/
   patch/PCSE00001/      # Game update (optional)
 ```
 
-Generate the memory card stub for your title (and its patch, if applicable):
+Generate the memory card stub for your title (and its patch, if applicable). A stub carries an `app0stream.txt` marker, which is what tells the plugin to stream that game:
 
 ```bash
 python app0stream_server.py stub Library PCSE00001 Stubs
@@ -69,15 +81,13 @@ Upon startup, the server prints the IPv4 address to use in your console configur
    * **NoNpDrm dumps** include their fake license at `sce_sys/package/work.bin`, which will be installed when refreshing the LiveArea.
    * **Retail/owned games** continue to use their existing license in `ux0:license/app/...`.
 
-3. Create the configuration file at `ux0:data/app0stream/config.txt`:
+3. Create the configuration file at `ux0:data/app0stream/config.txt` (the desktop app can write it alongside the stubs):
 
    ```ini
    server = 192.168.1.20
-   title = PCSE00001
-   patch = PCSE00001
    ```
 
-4. Reboot the console, open **VitaShell**, and run **Refresh LiveArea** to populate the game bubble on the home screen.
+4. Reboot the console, open **VitaShell**, and run **Refresh LiveArea** to populate the game bubbles on the home screen. Launching any bubble whose stub carries the marker streams that game; any number of games can be installed this way.
 
 ---
 
@@ -89,8 +99,8 @@ Upon startup, the server prints the IPv4 address to use in your console configur
 | :--- | :--- | :--- |
 | `server` | *(Required)* | IPv4 address of the host PC running the server. |
 | `port` | `7350` | TCP port used by the server. |
-| `title` | *(None)* | Streams `ux0:app/TITLEID` (specify one `title` line per game). |
-| `patch` | *(None)* | Also streams `ux0:patch/TITLEID` (specify one `patch` line per patched game). |
+| `title` | *(None)* | Streams `ux0:app/TITLEID` even when its stub has no marker (one line per game). |
+| `patch` | *(None)* | The same for `ux0:patch/TITLEID`. |
 | `connections` | `2` | Number of parallel TCP connections (`1` to `4`). |
 | `cache_kb` | `256` | Kernel RAM cache size in KiB (`256` to `16384`). |
 | `readahead_kb` | `256` | Prefetch window size in KiB for sequential reads. |
