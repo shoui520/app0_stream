@@ -89,6 +89,7 @@ class Api:
         self._titles = []
         self._window = None
         self._tray = None
+        self._external = None    # (port, is app0stream) of a server not ours
 
         srv.add_log_sink(self._on_log)
 
@@ -111,15 +112,33 @@ class Api:
             server = self._server
             error = self._error
 
+        external = None
+        if server is None:
+            external = self._find_external(int(self._settings["port"]))
+
         state = {
             "settings": self._settings,
             "addresses": srv.local_addresses(),
             "running": server is not None,
+            "external": external,
             "error": error,
             "stats": server.stats.snapshot() if server else None,
             "settings_path": settings_path(),
         }
         return state
+
+    def _find_external(self, port):
+        """What holds port when this app's server does not: "app0stream",
+        "other" or None.  A HELLO is sent only when that changes."""
+        if not srv.port_in_use(port):
+            self._external = None
+            return None
+
+        if self._external is None or self._external[0] != port:
+            known = srv.probe_server(port) is not None
+            self._external = (port, known)
+
+        return "app0stream" if self._external[1] else "other"
 
     def set_settings(self, changes):
         for k, v in changes.items():
@@ -168,6 +187,13 @@ class Api:
         with self._lock:
             if self._server is not None:
                 return {"ok": True}
+
+        port = int(self._settings["port"])
+        if srv.port_in_use(port):
+            what = self._find_external(port)
+            msg = (f"another app0stream server is already serving on port {port}; stop it first"
+                   if what == "app0stream" else f"port {port} is used by another program")
+            return {"ok": False, "error": msg}
 
         try:
             server = srv.start_server(self._settings["library"], int(self._settings["port"]))
@@ -273,7 +299,11 @@ class Api:
             self._tray.update_menu()
 
     def _tray_title(self):
-        return "app0stream: " + ("serving" if self._server else "stopped")
+        if self._server:
+            return "app0stream: serving"
+        if self._external and self._external[1]:
+            return "app0stream: serving from another process"
+        return "app0stream: stopped"
 
     def _show(self, *_):
         self._window.show()

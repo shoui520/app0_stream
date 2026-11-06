@@ -349,13 +349,16 @@ function renderAddresses() {
 }
 
 function renderServer() {
-  const on = state.running, st = state.stats;
-  $("status").textContent = on ? "Serving" : "Stopped";
-  $("status").classList.toggle("on", on);
+  const on = state.running, st = state.stats, ext = state.external;
+  $("status").textContent = on ? "Serving" : ext === "app0stream" ? "Serving (outside this app)" : "Stopped";
+  $("status").classList.toggle("on", on || ext === "app0stream");
   $("toggle").textContent = on ? "Stop server" : "Start server";
-  $("toggle").classList.toggle("primary", !on);
+  $("toggle").classList.toggle("primary", !on && !ext);
+  $("toggle").disabled = !on && !!ext;
   $("port").disabled = on;
-  $("error").textContent = state.error || "";
+  $("error").textContent = state.error || (
+    ext === "app0stream" ? `Another app0stream server (e.g. app0stream_server.py serve) is serving port ${state.settings.port}. Its consoles and totals are not visible here; stop it to serve from this app.` :
+    ext === "other" ? `Port ${state.settings.port} is used by another program.` : "");
 
   $("uptime").textContent = st ? duration(Date.now() / 1000 - st.started) : "–";
   $("requests").textContent = st ? st.requests.toLocaleString() : "–";

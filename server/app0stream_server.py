@@ -376,8 +376,15 @@ class Stats:
 
 
 class Server(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
+    # on Windows SO_REUSEADDR would let a second server bind the same port
+    # and silently share the consoles; it gets the port to itself instead
+    allow_reuse_address = sys.platform != "win32"
     daemon_threads = True
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def stop(self):
         """Stops accepting, drops every connection and frees the port."""
@@ -411,6 +418,33 @@ def local_addresses():
         return [addr]
     except OSError:
         return []
+
+
+def port_in_use(port, bind="0.0.0.0"):
+    """Whether something is listening on port; it connects to nothing, so
+    the other server logs nothing."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if sys.platform == "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        s.bind((bind, port))
+        return False
+    except OSError:
+        return True
+    finally:
+        s.close()
+
+
+def probe_server(port, host="127.0.0.1", timeout=2.0):
+    """The protocol version of the app0stream server on port, or None when
+    whatever is there does not answer HELLO."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as s:
+            s.sendall(REQ.pack(REQ_MAGIC, 1, OP_HELLO, 0, VERSION, 0))
+            magic, seq, status, length = RSP.unpack(recv_exact(s, RSP.size))
+    except (OSError, ConnectionError, struct.error):
+        return None
+    return status if magic == RSP_MAGIC and seq == 1 else None
 
 
 def start_server(library, port=DEFAULT_PORT, bind="0.0.0.0", verbose=0):
