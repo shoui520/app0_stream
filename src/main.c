@@ -11,8 +11,10 @@
  * 1001, mode 2).
  *
  * The hook below changes the lower path scePfsMount is given: for a
- * configured title, net0:/.m<n>/app/TITLEID instead of ux0:app/TITLEID (a
- * root of its own for every mount, see vfs.c).  PFS stacks
+ * streamed title, net0:/.m<n>/app/TITLEID instead of ux0:app/TITLEID (a
+ * root of its own for every mount, see vfs.c).  A title is streamed when its
+ * stub carries the marker file (A0S_MARKER) or config.txt lists it, so a
+ * game is launched from its LiveArea bubble like any other.  PFS stacks
  * on net0: exactly as it would on the memory card and decrypts on the
  * console.  The content record appmgr keeps (appDirectory) still says ux0:,
  * so the patch path, the add-on content path, the license lookup
@@ -29,7 +31,7 @@
  * What stays on the memory card is a stub of the game: sce_sys/ (param.sfo,
  * the package header and the license files appmgr reads straight from
  * ux0:app/TITLEID) and sce_pfs/ (so appmgrIsPfsContent still sees PFS
- * content).  app0stream_server.py makes it.
+ * content), plus the marker.  app0stream_server.py makes it.
  */
 
 #include <psp2kern/kernel/modulemgr.h>
@@ -134,6 +136,19 @@ static void loadConfig(void)
 	g_a0sTrace  = g_config.trace;
 }
 
+/* the stub's marker, or a title or patch line in config.txt */
+static int isStreamed(int patch, const char *title)
+{
+	if (a0sConfigHasTitle(&g_config, patch, title))
+		return 1;
+
+	char marker[64];
+
+	snprintf(marker, sizeof(marker), "ux0:%s/%s/" A0S_MARKER, patch ? "patch" : "app", title);
+
+	return a0sFileExists(marker);
+}
+
 /* the client and the cache start with the first configuration that asks for
  * them; later ones only change the server */
 static int ensureClient(void)
@@ -175,16 +190,16 @@ static int redirect(const char *path, char *out, SceUInt32 cap)
 
 	int r = -1;
 
-	if (!a0sConfigHasTitle(&g_config, patch, title))
+	if (!isStreamed(patch, title))
 		goto out;
 
 	if (!g_netOk) {
-		A0S_LOG("%s is listed, but kernel sockets cannot receive (see above)\n", title);
+		A0S_LOG("%s is streamed, but kernel sockets cannot receive (see above)\n", title);
 		goto out;
 	}
 
 	if (g_config.serverIp == 0) {
-		A0S_LOG("%s is listed, but no server is set\n", title);
+		A0S_LOG("%s is streamed, but no server is set in config.txt\n", title);
 		goto out;
 	}
 

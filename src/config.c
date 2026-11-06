@@ -3,8 +3,9 @@
  *
  *   server       = 192.168.1.20   the PC running app0stream_server.py
  *   port         = 7350
- *   title        = PCSE00001      stream ux0:app/PCSE00001 (a line per game)
- *   patch        = PCSE00001      also stream ux0:patch/PCSE00001
+ *   title        = PCSE00001      stream ux0:app/PCSE00001 even without
+ *                                 its stub's marker (a line per game)
+ *   patch        = PCSE00001      the same for ux0:patch/PCSE00001
  *   connections  = 2              parallel TCP connections, 1 to 4
  *   cache_kb     = 256            RAM cache, in kernel memory (games need it too)
  *   readahead_kb = 256            prefetch window for sequential reads

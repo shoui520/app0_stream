@@ -70,6 +70,7 @@ void a0sDebugPrint(const char *text);
 
 /* files on the console's own storage */
 int a0sReadFile(const char *path, char *buf, SceUInt32 cap);    /* bytes read */
+int a0sFileExists(const char *path);
 int a0sAppendFile(const char *path, const char *buf, SceUInt32 len);
 
 /* ---- logging (log.c) ----------------------------------------------------- */
@@ -99,6 +100,10 @@ extern volatile int g_a0sTrace;
 
 #define A0S_CONFIG_PATH  "ux0:data/app0stream/config.txt"
 #define A0S_LOG_PATH     "ux0:data/app0stream/log.txt"
+
+/* in a stub's top folder (ux0:app/TITLEID/ or ux0:patch/TITLEID/), it marks
+ * the game as streamed; app0stream_server.py writes it */
+#define A0S_MARKER       "app0stream.txt"
 #define A0S_MAX_TITLES   128
 
 typedef struct A0sConfig {

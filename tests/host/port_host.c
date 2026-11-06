@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <arpa/inet.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -282,6 +283,13 @@ int a0sReadFile(const char *path, char *buf, SceUInt32 cap)
 	fclose(f);
 
 	return (int)n;
+}
+
+int a0sFileExists(const char *path)
+{
+	struct stat st;
+
+	return stat(path, &st) == 0;
 }
 
 int a0sAppendFile(const char *path, const char *buf, SceUInt32 len)

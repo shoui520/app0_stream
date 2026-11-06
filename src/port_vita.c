@@ -261,6 +261,13 @@ int a0sReadFile(const char *path, char *buf, SceUInt32 cap)
 	return (int)total;
 }
 
+int a0sFileExists(const char *path)
+{
+	SceIoStat st;
+
+	return ksceIoGetstat(path, &st) >= 0;
+}
+
 int a0sAppendFile(const char *path, const char *buf, SceUInt32 len)
 {
 	SceUID fd = ksceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_APPEND, 0666);
